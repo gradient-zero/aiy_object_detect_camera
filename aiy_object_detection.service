@@ -11,7 +11,7 @@ Restart=no
 User=pi
 Environment=AIY_BOARD_NAME=AIY-Board
 EnvironmentFile=-/run/aiy-board-info
-ExecStart=/usr/bin/python3 /home/pi/AIY-projects-python/src/examples/vision/joy/joy_detection_demo.py --enable_streaming --mdns_name "${AIY_BOARD_NAME}" --blink_on_error
+ExecStart=/usr/bin/python3 /home/pi/workspace/aiy_object_detection_camera/aiy_object_detect.py --enable_streaming --mdns_name "${AIY_BOARD_NAME}" --blink_on_error
 
 [Install]
 WantedBy=multi-user.target

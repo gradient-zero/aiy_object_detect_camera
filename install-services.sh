@@ -16,6 +16,7 @@
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+unlink /lib/systemd/system/aiy_object_detection.service
 ln -s ${SCRIPT_DIR}/aiy_object_detection.service /lib/systemd/system/aiy_object_detection.service
 systemctl daemon-reload
 systemctl enable aiy_object_detection.service

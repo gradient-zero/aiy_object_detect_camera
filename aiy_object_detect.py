@@ -33,7 +33,7 @@ from aiy.board import Board
 from aiy.leds import Color, Leds, Pattern, PrivacyLed
 from aiy.toneplayer import TonePlayer
 from aiy.vision.inference import CameraInference
-from aiy.vision.models import face_detection
+from aiy.vision.models import object_detection
 from aiy.vision.streaming.server import StreamingServer
 from aiy.vision.streaming import svg
 
@@ -65,12 +65,19 @@ def stopwatch(message):
         logger.info('%s done. (%fs)', message, end - begin)
 
 
+def crop_center(image):
+    width, height = image.size
+    size = min(width, height)
+    x, y = (width - size) / 2, (height - size) / 2
+    return image.crop((x, y, x + size, y + size)), (x, y)
+
+
 def run_inference(num_frames, on_loaded):
     """Yields (faces, (frame_width, frame_height)) tuples."""
-    with CameraInference(face_detection.model()) as inference:
+    with CameraInference(object_detection.model()) as inference:
         on_loaded()
         for result in inference.run(num_frames):
-            yield face_detection.get_faces(result), (result.width, result.height)
+            yield object_detection.get_objects(result), (result.width, result.height)
 
 
 def threshold_detector(low_threshold, high_threshold):
@@ -114,21 +121,23 @@ def scale_bounding_box(bounding_box, scale_x, scale_y):
     return (x * scale_x, y * scale_y, w * scale_x, h * scale_y)
 
 
-def svg_overlay(faces, frame_size, joy_score):
+def svg_overlay(obj, frame_size, action=None, distance=0.0, percent=0.0):
+    if obj is None:
+        width, height = frame_size
+        doc = svg.Svg(width=width, height=height)
+        return str(doc)
     width, height = frame_size
     doc = svg.Svg(width=width, height=height)
+        
+    x, y, w, h = obj.bounding_box
+    doc.add(svg.Rect(x=int(x), y=int(y), width=int(w), height=int(h), rx=10, ry=10,
+                         fill_opacity=0.3 * 1,
+                         style='fill:green;stroke:white;stroke-width:4px'))
 
-    for face in faces:
-        x, y, w, h = face.bounding_box
-        doc.add(svg.Rect(x=int(x), y=int(y), width=int(w), height=int(h), rx=10, ry=10,
-                         fill_opacity=0.3 * face.face_score,
-                         style='fill:red;stroke:white;stroke-width:4px'))
-
-        doc.add(svg.Text('Joy: %.2f' % face.joy_score, x=x, y=y - 10,
-                         fill='red', font_size=30))
-
-    doc.add(svg.Text('Faces: %d Avg. joy: %.2f' % (len(faces), joy_score),
-            x=10, y=50, fill='red', font_size=40))
+    doc.add(svg.Text('action: %s, \ndist: %.2f, \npercent: %.2f' % (action, distance, percent),
+            x=0, y=y + 100,
+            fill='red', font_size=50))
+    
     return str(doc)
 
 
@@ -266,8 +275,7 @@ class Animator(Service):
     def update_joy_score(self, joy_score):
         self.submit(joy_score)
 
-
-def joy_detector(num_frames, preview_alpha, image_format, image_folder,
+def object_detector(num_frames, preview_alpha, image_format, image_folder,
                  enable_streaming, streaming_bitrate, mdns_name):
     done = threading.Event()
     def stop():
@@ -314,20 +322,24 @@ def joy_detector(num_frames, preview_alpha, image_format, image_folder,
         joy_moving_average.send(None)  # Initialize.
         joy_threshold_detector = threshold_detector(JOY_SCORE_LOW, JOY_SCORE_HIGH)
         joy_threshold_detector.send(None)  # Initialize.
-        for faces, frame_size in run_inference(num_frames, model_loaded):
-            photographer.update_faces((faces, frame_size))
-            joy_score = joy_moving_average.send(average_joy_score(faces))
-            animator.update_joy_score(joy_score)
-            event = joy_threshold_detector.send(joy_score)
-            if event == 'high':
-                logger.info('High joy detected.')
-                player.play(JOY_SOUND)
-            elif event == 'low':
-                logger.info('Low joy detected.')
-                player.play(SAD_SOUND)
+        for objects, frame_size in run_inference(num_frames, model_loaded):
+            if len(objects) == 0:
+                if server:
+                    server.send_overlay(svg_overlay(None, frame_size, '', 0.0, 0.0))
+                continue
+            #photographer.update_faces((faces, frame_size))
+            #joy_score = joy_moving_average.send(average_joy_score(faces))
+            #animator.update_joy_score(joy_score)
+            #event = joy_threshold_detector.send(joy_score)
+            #if event == 'high':
+            #    logger.info('High joy detected.')
+            #    player.play(JOY_SOUND)
+            #elif event == 'low':
+            #    logger.info('Low joy detected.')
+            #    player.play(SAD_SOUND)
 
             if server:
-                server.send_overlay(svg_overlay(faces, frame_size, joy_score))
+                server.send_overlay(svg_overlay(objects[0], frame_size, '', 0.0, 0.0))
 
             if done.is_set():
                 break
@@ -363,7 +375,14 @@ def main():
     args = parser.parse_args()
 
     try:
-        joy_detector(args.num_frames, args.preview_alpha, args.image_format, args.image_folder,
+        #num_frames=None
+        #preview_alpha=0
+        #image_format=jpeg
+        #image_folder='~_Pictures'
+        #enable_streaming=True
+        #streaming_bitrage=1000000
+        #dnsName
+        object_detector(args.num_frames, args.preview_alpha, args.image_format, args.image_folder,
                      args.enable_streaming, args.streaming_bitrate, args.mdns_name)
     except KeyboardInterrupt:
         pass
